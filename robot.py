@@ -106,13 +106,12 @@ class SpartaBot(MagicRobot):
         angle = self.drive_controller.getRightX()
         speed = self.drive_controller.getLeftY()
 
-        flickspeed = 0
+        flickspeed = 0.1
         intakespeed = 0
+        STOP_MOTOR = False
         
         flickspeed += self.drive_controller.getLeftTriggerAxis()
         flickspeed -= self.drive_controller.getRightTriggerAxis()
-        intakespeed += self.drive_controller.getLeftBumper()
-        intakespeed -= self.drive_controller.getRightBumper()
 
         '''WRIST'''
         if(abs(flickspeed) > INPUT_SENSITIVITY):
@@ -121,14 +120,23 @@ class SpartaBot(MagicRobot):
             # Setting limit to prevent potential internal damage
         
         '''GRABBER'''
-        if(abs(intakespeed) > INPUT_SENSITIVITY):
+        if(self.drive_controller.getAButtonReleased()): STOP_MOTOR = False
+        # Releasing the A Button will undo the kill_switch command
+        if(self.drive_controller.getLeftBumperPressed()):
             self.grabber.grab(intakespeed) # increase/decrease grabber speeds
             self.sd.putValue('Grabber: ', 'moving')
+
+        elif(self.drive_controller.getRightBumperPressed()):
+            self.grabber.grab(-intakespeed)
+            self.sd.putValue('Grabber: ', 'moving')
+
         elif(self.drive_controller.getAButtonPressed()): 
-            self.talon_G_1.set(0.0, 0.0) # kill switch
+            self.talon_G_1.set(0.0) # kill switch
+            STOP_MOTOR = True
             self.sd.putValue('Grabber: ', 'STOP')
-        else: 
-            self.talon_G_1.set(0.15, 0.0) # default hold-in speeds
+
+        elif(STOP_MOTOR == False):
+            self.talon_G_1.set(0.03) # default hold-in speeds
             self.sd.putValue('Grabber: ', 'holding')
 
         '''DRIVETRAIN'''
