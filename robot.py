@@ -6,14 +6,14 @@ from networktables import NetworkTables, NetworkTable
 from wpilib import DoubleSolenoid
 
 from components.drivetrain import DriveTrain
-from components.arm import Boom
-from components.grabber import grabber
-# from controllers.gyro import Gyro
+from components.boom import Boom
+from controllers.gyro import Gyro
 import wpilib.drive
 from robotpy_ext.autonomous import AutonomousModeSelector
 from ctre import NeutralMode
 import navx
 import rev 
+from wpimath.controller import PIDController
 
 # Download and install stuff on the RoboRIO after imaging
 '''
@@ -51,20 +51,21 @@ WINDING_SPEED = .5
 BRAKE_MODE = NeutralMode(2)
 COAST_MODE = NeutralMode(1)
 
+PID_TARGET_INPUT_MULTIPLIER = 1000
+
 class SpartaBot(MagicRobot):
 
     # a DriveTrain instance is automatically created by MagicRobot
 
     drivetrain: DriveTrain
-    grabber: grabber
-    # gyro: Gyro
-    arm: Boom
+    gyro: Gyro
+    boom_arm: Boom
     
 
     def createObjects(self):
         MOTOR_BRUSHLESS = rev._rev.CANSparkMaxLowLevel.MotorType.kBrushless
         '''Create motors and stuff here'''
-        self.boom_extender_motor: rev.CANSparkMax = rev.CANSparkMax(1, MOTOR_BRUSHLESS)
+        self.boom_extender_motor: rev.CANSparkMax = rev.CANSparkMax(3, MOTOR_BRUSHLESS)
         self.boom_extender_motor_encoder: rev.SparkMaxRelativeEncoder = self.boom_extender_motor.getEncoder()
         NetworkTables.initialize(server='roborio-5045-frc.local')
         self.sd: NetworkTable = NetworkTables.getTable('SmartDashboard')
@@ -77,9 +78,17 @@ class SpartaBot(MagicRobot):
         self.talon_R_1 = WPI_TalonFX(7) #6 - SQID #OSBot: 7
         self.talon_R_2 = WPI_TalonFX(6) #9 - SQID #OSBot: 6
 
-        self.talon_W_1 = WPI_TalonFX(0) # 0 serves as placeholder in this case
-        self.talon_G_1 = WPI_TalonSRX(0) # See above comment
+        # self.talon_W_1 = WPI_TalonFX(3)
+        # self.talon_G_1 = WPI_TalonSRX(1) 
+        # self.talon_G_1 = rev.CANSparkMax(2, MOTOR_BRUSHLESS)
+        # self.armPID = PIDController(0.00001, 0.0001, 0.0001, 0.02)
+        # self.armPID.setTolerance(50)
+        # self.arm_pid_target = self.boom_extender_motor_encoder.getPosition()
+        # self.arm_pid_output = 0
+        # self.arm_pid_enabled = False
 
+        self.boom_rotator_motor1 = WPI_TalonFX(5)
+        self.boom_rotator_motor2 = WPI_TalonFX(3)
 
     def disabledPeriodic(self):
         self.sd.putValue("Mode", "Disabled")
@@ -87,9 +96,6 @@ class SpartaBot(MagicRobot):
     def teleopInit(self):
         self.sd.putValue("Mode", "Teleop")
         self.boom_extender_motor_encoder.setPosition(0)
-        # self.limelight = NetworkTables.getTable("limelight")
-        # self.limelight.LEDState(3)
-        # print("limelight on")
         '''Called when teleop starts; optional'''
 
     def teleopPeriodic(self):
@@ -101,43 +107,54 @@ class SpartaBot(MagicRobot):
         self.talon_L_2.setNeutralMode(COAST_MODE)
         self.talon_R_1.setNeutralMode(COAST_MODE)
         self.talon_R_2.setNeutralMode(COAST_MODE)
-        # drive controls
-        # print("tele")
         angle = self.drive_controller.getRightX()
         speed = self.drive_controller.getLeftY()
 
-        flickspeed = 0.1
-        intakespeed = 0
+        intakespeed = 0.2
         STOP_MOTOR = False
-        
-        flickspeed += self.drive_controller.getLeftTriggerAxis()
-        flickspeed -= self.drive_controller.getRightTriggerAxis()
 
-        '''WRIST'''
-        if(abs(flickspeed) > INPUT_SENSITIVITY):
-            self.grabber.rotate(flickspeed)
-            if(grabber.getPosition() > WRIST_ROT_LIMIT): self.talon_W_1.set(0.0, 0.0)
-            # Setting limit to prevent potential internal damage
+        '''ARM'''
+        # if (abs(self.drive_controller.getRightTriggerAxis()) > INPUT_SENSITIVITY or abs(
+        #         self.drive_controller.getLeftTriggerAxis()) > INPUT_SENSITIVITY):
+        #     self.arm_pid_target += self.drive_controller.getRightTriggerAxis() * PID_TARGET_INPUT_MULTIPLIER
+        #     self.arm_pid_target -= self.drive_controller.getLeftTriggerAxis() * PID_TARGET_INPUT_MULTIPLIER
+        #     self.armPID.setSetpoint(self.arm_pid_target)
+        #     if not self.arm_pid_enabled:
+        #         self.arm_pid_target = (self.boom_rotator_motor1.getSelectedSensorPosition() + self.boom_rotator_motor2.getSelectedSensorPosition()) / 2
+        #         self.armPID.setSetpoint(self.arm_pid_target)
+        #         self.arm_pid_enabled = True
+        #         self.armPID.reset()
+
+        # if self.drive_controller.getBackButtonReleased():
+        #     self.arm_pid_enabled = not self.arm_pid_enabled
+        #     if self.arm_pid_enabled:
+        #         self.armPID.setSetpoint(self.arm_pid_target)
+
+        # if self.arm_pid_enabled:
+        #     self.arm_pid_output = self.armPID.calculate((self.boom_rotator_motor1.getSelectedSensorPosition() + self.boom_rotator_motor2.getSelectedSensorPosition()) / 2)
+        #     self.boom_arm.set_rotator(self.arm_pid_output)
+        # else:
+        #     self.boom_arm.set_rotator(0)
+        #     self.armPID.reset()
         
         '''GRABBER'''
-        if(self.drive_controller.getAButtonReleased()): STOP_MOTOR = False
         # Releasing the A Button will undo the kill_switch command
-        if(self.drive_controller.getLeftBumperPressed()):
-            self.grabber.grab(intakespeed) # increase/decrease grabber speeds
-            self.sd.putValue('Grabber: ', 'moving')
+        # if(self.drive_controller.getYButton()):
+        #     self.talon_G_1.set(intakespeed) # increase/decrease grabber speeds
+        #     self.sd.putValue('Grabber: ', 'moving')
 
-        elif(self.drive_controller.getRightBumperPressed()):
-            self.grabber.grab(-intakespeed)
-            self.sd.putValue('Grabber: ', 'moving')
+        # elif(self.drive_controller.getBButton()):
+        #     self.talon_G_1.set(-intakespeed)
+        #     self.sd.putValue('Grabber: ', 'moving')
 
-        elif(self.drive_controller.getAButtonPressed()): 
-            self.talon_G_1.set(0.0) # kill switch
-            STOP_MOTOR = True
-            self.sd.putValue('Grabber: ', 'STOP')
+        # elif(self.drive_controller.getAButtonPressed()): 
+        #     self.talon_G_1.set(0.0) # kill switch
+        #     STOP_MOTOR = True
+        #     self.sd.putValue('Grabber_Status: ', STOP_MOTOR)
 
-        elif(STOP_MOTOR == False):
-            self.talon_G_1.set(0.03) # default hold-in speeds
-            self.sd.putValue('Grabber: ', 'holding')
+        # elif(STOP_MOTOR == False):
+        #     self.talon_G_1.set(0.04) # default hold-in speeds
+        #     self.sd.putValue('Grabber: ', 'holding')
 
         '''DRIVETRAIN'''
         if (abs(angle) > INPUT_SENSITIVITY or abs(speed) > INPUT_SENSITIVITY):
@@ -148,22 +165,32 @@ class SpartaBot(MagicRobot):
             self.drivetrain.set_motors(0.0, 0.0)
             self.sd.putValue('Drivetrain: ', 'static')
 
-        wind_speed = 0
+        # wind_speed = 0
 
-        if (self.drive_controller.getRightBumper()):
-            wind_speed -= WINDING_SPEED
+        # if (self.drive_controller.getRightBumper()):
+        #     wind_speed -= WINDING_SPEED
 
-        if (self.drive_controller.getLeftBumper()):
-            wind_speed += WINDING_SPEED
+        # if (self.drive_controller.getLeftBumper()):
+        #     wind_speed += WINDING_SPEED
 
+        # self.boom_arm.set_extender(wind_speed, self.boom_extender_motor_encoder)
 
-        # if self.drive_controller.getAButton(): self.gyro.balancing()
+        # if self.drive_controller.getXButton(): self.gyro.balancing()
         # else:
         #     self.drivetrain.set_motors(0.0, 0.0)
         #     self.talon_L_1.setNeutralMode(BRAKE_MODE)
         #     self.talon_L_2.setNeutralMode(BRAKE_MODE)
         #     self.talon_R_1.setNeutralMode(BRAKE_MODE)
         #     self.talon_R_2.setNeutralMode(BRAKE_MODE)
+
+        # self.sd.putValue("rotator 1 encoder", self.boom_rotator_motor1.getSelectedSensorPosition())
+        # self.sd.putValue("rotator 2 encoder", self.boom_rotator_motor2.getSelectedSensorPosition())
+        # self.sd.putValue("average rotator encoder", (
+        #         self.boom_rotator_motor1.getSelectedSensorPosition() + self.boom_rotator_motor2.getSelectedSensorPosition()) / 2)
+        # self.sd.putValue("rotator pid error", self.armPID.getPositionError())
+        # self.sd.putValue("rotator pid target", self.arm_pid_target)
+        # self.sd.putValue("rotator pid", self.arm_pid_output)
+        # self.sd.putValue("pid enabled", self.arm_pid_enabled)
 
         #NOTE: NAVX on the squarebot is INOP
         

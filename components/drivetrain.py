@@ -56,5 +56,5 @@ class DriveTrain:
         Reads the data from smartdashboard (set by control methods), and then sends data to output devices such as motors.
         Execute is called in telopPeriodic automatically; no need to manually call
         """
-
+        print(self.speed)
         self.drive.arcadeDrive(self.angle, self.speed, True)
